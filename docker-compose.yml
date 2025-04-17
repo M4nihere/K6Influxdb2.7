@@ -1,0 +1,65 @@
+services:
+  influxdb:
+    image: influxdb:2.7
+    ports:
+      - "8086:8086"
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=${INFLUXDB_INIT_USERNAME}
+      - DOCKER_INFLUXDB_INIT_PASSWORD=${INFLUXDB_INIT_PASSWORD}
+      - DOCKER_INFLUXDB_INIT_ORG=${INFLUXDB_INIT_ORG}
+      - DOCKER_INFLUXDB_INIT_BUCKET=${INFLUXDB_INIT_BUCKET}
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUXDB_INIT_ADMIN_TOKEN}
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+    networks:
+      - monitoring
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+      - INFLUXDB_INIT_ORG=${INFLUXDB_INIT_ORG}
+      - INFLUXDB_INIT_BUCKET=${INFLUXDB_INIT_BUCKET}
+      - INFLUXDB_INIT_ADMIN_TOKEN=${INFLUXDB_INIT_ADMIN_TOKEN}
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./influxdb.yml:/etc/grafana/provisioning/datasources/influxdb.yml
+    depends_on:
+      influxdb:
+        condition: service_healthy
+    networks:
+      - monitoring
+
+  k6:
+      build:
+        context: ./k6
+        dockerfile: Dockerfile
+      environment:
+        - K6_INFLUXDB_ORGANIZATION=${INFLUXDB_INIT_ORG}
+        - K6_INFLUXDB_BUCKET=${INFLUXDB_INIT_BUCKET}
+        - K6_INFLUXDB_TOKEN=${K6_INFLUXDB_TOKEN}
+        - K6_INFLUXDB_ADDR=http://influxdb:8086
+      volumes:
+        - ./k6:/scripts
+      command: run /scripts/test.js -o xk6-influxdb
+      depends_on:
+        influxdb:
+          condition: service_healthy
+      networks:
+        - monitoring
+volumes:
+  influxdb-data:
+  grafana-data:
+
+networks:
+  monitoring:
+    driver: bridge
